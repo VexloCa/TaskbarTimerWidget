@@ -1,0 +1,9 @@
+.vs/
+bin/
+obj/
+build/
+artifacts/
+*.user
+/TaskbarTimerWidget.exe
+*.pdb
+*.zip
