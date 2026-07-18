@@ -22,27 +22,36 @@ jobs:
 
       - name: Read release version
         id: version
-        shell: bash
+        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="$(tr -d '\r\n ' < VERSION)"
-          tag="v$version"
+          $version = (Get-Content -Raw -LiteralPath VERSION).Trim()
+          $tag = "v$version"
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $uri = "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag"
+          $exists = $false
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            exists=true
-          else
-            exists=false
-          fi
+          try {
+            Invoke-RestMethod -Uri $uri -Headers $headers | Out-Null
+            $exists = $true
+          }
+          catch {
+            if ($_.Exception.Response.StatusCode.value__ -ne 404) {
+              throw
+            }
+          }
 
-          {
-            echo "version=$version"
-            echo "tag=$tag"
-            echo "exists=$exists"
-          } >> "$GITHUB_OUTPUT"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "exists=$($exists.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
-          if [[ "$exists" == "true" ]]; then
-            echo "Release $tag already exists; nothing will be published."
+          if ($exists) {
+            Write-Host "Release $tag already exists; nothing will be published."
           }
 
       - name: Build, test, and package
