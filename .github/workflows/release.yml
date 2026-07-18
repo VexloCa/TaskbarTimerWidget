@@ -2,9 +2,12 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch:
+    branches:
+      - publish
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -17,30 +20,38 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Validate release tag
+      - name: Read release version
         id: version
-        shell: pwsh
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $version = (Get-Content -Raw -LiteralPath VERSION).Trim()
-          $expectedTag = "v$version"
-          $tag = "${{ github.ref_name }}"
+          version="$(tr -d '\r\n ' < VERSION)"
+          tag="v$version"
 
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $tag = $expectedTag
+          if gh release view "$tag" >/dev/null 2>&1; then
+            exists=true
+          else
+            exists=false
+          fi
+
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "exists=$exists"
+          } >> "$GITHUB_OUTPUT"
+
+          if [[ "$exists" == "true" ]]; then
+            echo "Release $tag already exists; nothing will be published."
           }
-
-          if ($tag -ne $expectedTag) {
-            throw "Tag '$tag' does not match VERSION ('$expectedTag')."
-          }
-
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Build, test, and package
+        if: steps.version.outputs.exists != 'true'
         shell: pwsh
         run: .\build.ps1 -Package -Version "${{ steps.version.outputs.version }}"
 
       - name: Upload workflow artifact
+        if: steps.version.outputs.exists != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: TaskbarTimerWidget-${{ steps.version.outputs.version }}-win
@@ -50,6 +61,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create GitHub Release
+        if: steps.version.outputs.exists != 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,5 +69,6 @@ jobs:
           gh release create "${{ steps.version.outputs.tag }}" `
             artifacts/*.zip `
             artifacts/*.sha256 `
+            --target "${{ github.sha }}" `
             --title "Taskbar Timer Widget ${{ steps.version.outputs.version }}" `
             --generate-notes
