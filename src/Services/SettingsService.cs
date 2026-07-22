@@ -4,7 +4,7 @@ namespace TaskbarTimerWidget
 {
     internal sealed class AppSettings
     {
-        public string SelectedPresetId = "30m";
+        public string SelectedPresetId = "10m";
         public string TargetMonitor = string.Empty;
         public string AlarmSound = "Chimes";
         public int HorizontalOffset;

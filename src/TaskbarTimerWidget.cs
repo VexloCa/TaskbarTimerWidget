@@ -611,7 +611,7 @@ namespace TaskbarTimerWidget
             dialogOpen = true;
             try
             {
-                TimeSpan suggested = timerState.Remaining > TimeSpan.Zero ? timerState.Remaining : selectedPreset.Duration;
+                TimeSpan suggested = TimeSpan.FromMinutes(15);
                 using (DurationDialog dialog = new DurationDialog(suggested))
                 {
                     if (dialog.ShowDialog() != DialogResult.OK) return;
@@ -1070,6 +1070,7 @@ namespace TaskbarTimerWidget
 
         public DurationDialog(TimeSpan current)
         {
+            if (current <= TimeSpan.Zero) current = TimeSpan.FromMinutes(15);
             SuspendLayout();
             Text = "Set countdown";
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);

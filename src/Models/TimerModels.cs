@@ -57,7 +57,7 @@ namespace TaskbarTimerWidget
                 if (string.Equals(preset.Id, id, StringComparison.OrdinalIgnoreCase)) return preset;
             }
 
-            return presets[2];
+            return presets[0];
         }
     }
 
