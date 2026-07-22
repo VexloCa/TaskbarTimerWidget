@@ -83,7 +83,7 @@ namespace TaskbarTimerWidget
         private TaskbarDockingService dockingService;
         private TimerPreset selectedPreset;
         private DateTime finishAnimationStarted;
-        private DateTime lastAlarmBeepTime;
+        private CancellationTokenSource alarmAudioCts;
         private string lastDisplayText = string.Empty;
         private bool exiting;
         private bool dialogOpen;
@@ -228,6 +228,8 @@ namespace TaskbarTimerWidget
             }
         }
 
+        private readonly ToolStripMenuItem soundMenuItem = new ToolStripMenuItem("Alarm sound");
+
         private void BuildContextMenu()
         {
             ToolStripMenuItem setMenuItem = new ToolStripMenuItem("Set custom timer...");
@@ -250,6 +252,7 @@ namespace TaskbarTimerWidget
             ToolStripMenuItem reattachMenuItem = new ToolStripMenuItem("Realign on taskbar");
             reattachMenuItem.Click += delegate { RepositionWidget(true); };
             monitorMenuItem.DropDownOpening += delegate { PopulateMonitorMenu(); };
+            soundMenuItem.DropDownOpening += delegate { PopulateSoundMenu(); };
             startupMenuItem.CheckOnClick = true;
             startupMenuItem.Checked = IsStartupEnabled();
             startupMenuItem.Click += delegate { SetStartup(startupMenuItem.Checked); };
@@ -264,6 +267,7 @@ namespace TaskbarTimerWidget
                 pauseMenuItem,
                 resetMenuItem,
                 new ToolStripSeparator(),
+                soundMenuItem,
                 monitorMenuItem,
                 reattachMenuItem,
                 startupMenuItem,
@@ -305,6 +309,191 @@ namespace TaskbarTimerWidget
                 };
                 monitorMenuItem.DropDownItems.Add(item);
             }
+        }
+
+        private void PopulateSoundMenu()
+        {
+            soundMenuItem.DropDownItems.Clear();
+
+            string currentSound = string.IsNullOrEmpty(settings.AlarmSound) ? "Chimes" : settings.AlarmSound;
+
+            var sounds = new[]
+            {
+                new { Id = "Chimes", Name = "Chimes" },
+                new { Id = "Chord", Name = "Chord" },
+                new { Id = "Ding", Name = "Ding" },
+                new { Id = "Tada", Name = "Tada Fanfare" },
+                new { Id = "Notify", Name = "Notification Chime" },
+                new { Id = "Alarm", Name = "Alarm Ring" },
+                new { Id = "Exclamation", Name = "Windows Exclamation" }
+            };
+
+            foreach (var sound in sounds)
+            {
+                ToolStripMenuItem item = new ToolStripMenuItem(sound.Name);
+                item.Tag = sound.Id;
+                item.Checked = string.Equals(currentSound, sound.Id, StringComparison.OrdinalIgnoreCase);
+                item.Click += delegate(object sender, EventArgs e)
+                {
+                    string selected = (string)((ToolStripMenuItem)sender).Tag;
+                    settings.AlarmSound = selected;
+                    SaveSettings();
+                    ThreadPool.QueueUserWorkItem(delegate
+                    {
+                        PlayAlarmSoundSync(selected, CancellationToken.None);
+                        Thread.Sleep(100);
+                    });
+                };
+                soundMenuItem.DropDownItems.Add(item);
+            }
+        }
+
+        private void StartAlarmAudioLoop()
+        {
+            StopAlarmAudioLoop();
+            alarmAudioCts = new CancellationTokenSource();
+            CancellationToken token = alarmAudioCts.Token;
+            string soundId = settings.AlarmSound;
+            DateTime startTime = DateTime.UtcNow;
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                while (!token.IsCancellationRequested && (DateTime.UtcNow - startTime).TotalMilliseconds < 5000.0)
+                {
+                    PlayAlarmSoundSync(soundId, token);
+                    if (token.IsCancellationRequested || (DateTime.UtcNow - startTime).TotalMilliseconds >= 5000.0) break;
+                    
+                    try
+                    {
+                        Thread.Sleep(100);
+                    }
+                    catch
+                    {
+                        break;
+                    }
+                }
+            });
+        }
+
+        private void StopAlarmAudioLoop()
+        {
+            if (alarmAudioCts != null)
+            {
+                try { alarmAudioCts.Cancel(); } catch {}
+                try { alarmAudioCts.Dispose(); } catch {}
+                alarmAudioCts = null;
+            }
+        }
+
+        private void PlayAlarmSoundSync(string soundId, CancellationToken token)
+        {
+            if (token.IsCancellationRequested) return;
+            try
+            {
+                soundId = soundId ?? settings.AlarmSound ?? "Chimes";
+                string mediaPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Media");
+                string wavFile = null;
+
+                switch (soundId.ToLowerInvariant())
+                {
+                    case "chimes":
+                        wavFile = System.IO.Path.Combine(mediaPath, "chimes.wav");
+                        break;
+                    case "chord":
+                        wavFile = System.IO.Path.Combine(mediaPath, "chord.wav");
+                        break;
+                    case "ding":
+                        wavFile = System.IO.Path.Combine(mediaPath, "ding.wav");
+                        break;
+                    case "tada":
+                        wavFile = System.IO.Path.Combine(mediaPath, "tada.wav");
+                        break;
+                    case "notify":
+                        wavFile = System.IO.Path.Combine(mediaPath, "notify.wav");
+                        break;
+                    case "alarm":
+                        wavFile = System.IO.Path.Combine(mediaPath, "Alarm01.wav");
+                        break;
+                    case "exclamation":
+                        SystemSounds.Exclamation.Play();
+                        Thread.Sleep(400);
+                        return;
+                }
+
+                if (wavFile != null && System.IO.File.Exists(wavFile))
+                {
+                    using (SoundPlayer player = new SoundPlayer(wavFile))
+                    {
+                        player.PlaySync();
+                    }
+                }
+                else
+                {
+                    SystemSounds.Exclamation.Play();
+                    Thread.Sleep(400);
+                }
+            }
+            catch
+            {
+                try { SystemSounds.Beep.Play(); Thread.Sleep(300); } catch {}
+            }
+        }
+
+        private void AnnounceFinished()
+        {
+            finishAnimationActive = true;
+            finishAnimationStarted = DateTime.UtcNow;
+            warningHighlightActive = false;
+            countdownDisplay.Text = "00:00:00";
+            lastDisplayText = "00:00:00";
+            Text = "00:00:00 - Taskbar Timer Widget";
+            toolTip.SetToolTip(countdownDisplay, "Time is up. Choose a preset, or right-click and choose Set custom timer.");
+            RefreshCountdownTimer();
+            RepositionWidget(true);
+            StartAlarmAudioLoop();
+        }
+
+        private void UpdateWarningVisual()
+        {
+            TimeSpan remaining = timerState.Remaining;
+            bool inFinalTenSeconds = remaining > TimeSpan.Zero && remaining.TotalSeconds <= 10.0;
+            if (!inFinalTenSeconds)
+            {
+                if (warningHighlightActive)
+                {
+                    warningHighlightActive = false;
+                    ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+                }
+                return;
+            }
+
+            bool highlight = ((int)(remaining.TotalMilliseconds / 250.0) % 2) == 0;
+            if (warningHighlightActive == highlight) return;
+            warningHighlightActive = highlight;
+            ApplyCountdownColors(
+                highlight ? Color.FromArgb(166, 44, 54) : GetThemeBackColor(),
+                highlight ? Color.White : GetThemeForeColor());
+        }
+
+        private void UpdateFinishAnimation()
+        {
+            const double animationDurationMilliseconds = 5000.0;
+            DateTime now = DateTime.UtcNow;
+            double elapsed = (now - finishAnimationStarted).TotalMilliseconds;
+            if (elapsed >= animationDurationMilliseconds)
+            {
+                finishAnimationActive = false;
+                StopAlarmAudioLoop();
+                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+                RefreshCountdownTimer();
+                return;
+            }
+
+            double progress = elapsed / animationDurationMilliseconds;
+            double pulse = Math.Pow(Math.Sin(progress * Math.PI * 5.0), 2.0) * (1.0 - progress * 0.2);
+            Color background = BlendColor(GetThemeBackColor(), Color.FromArgb(202, 48, 60), pulse);
+            Color foreground = BlendColor(GetThemeForeColor(), Color.White, pulse);
+            ApplyCountdownColors(background, foreground);
         }
 
         private void ShowPresetDropDown()
@@ -361,6 +550,7 @@ namespace TaskbarTimerWidget
             timerState.SelectPreset(preset);
             settings.SelectedPresetId = preset.Id;
             finishAnimationActive = false;
+            StopAlarmAudioLoop();
             warningHighlightActive = false;
             ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
             SaveSettings();
@@ -430,6 +620,7 @@ namespace TaskbarTimerWidget
                 }
 
                 finishAnimationActive = false;
+                StopAlarmAudioLoop();
                 warningHighlightActive = false;
                 ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
                 toolTip.SetToolTip(countdownDisplay, "Right-click and choose Set custom timer to enter a custom duration.");
@@ -471,6 +662,7 @@ namespace TaskbarTimerWidget
             if (!timerState.Start(DateTime.UtcNow)) return;
 
             finishAnimationActive = false;
+            StopAlarmAudioLoop();
             warningHighlightActive = false;
             ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
             ApplyStateToControls();
@@ -482,6 +674,7 @@ namespace TaskbarTimerWidget
         {
             timerState.Reset();
             finishAnimationActive = false;
+            StopAlarmAudioLoop();
             warningHighlightActive = false;
             ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
             toolTip.SetToolTip(countdownDisplay, "Right-click and choose Set custom timer to enter a custom duration.");
@@ -528,82 +721,7 @@ namespace TaskbarTimerWidget
                 : displayText + " - Taskbar Timer Widget";
         }
 
-        private void AnnounceFinished()
-        {
-            finishAnimationActive = true;
-            finishAnimationStarted = DateTime.UtcNow;
-            lastAlarmBeepTime = DateTime.UtcNow;
-            warningHighlightActive = false;
-            countdownDisplay.Text = "00:00:00";
-            lastDisplayText = "00:00:00";
-            Text = "00:00:00 - Taskbar Timer Widget";
-            toolTip.SetToolTip(countdownDisplay, "Time is up. Choose a preset, or right-click and choose Set custom timer.");
-            RefreshCountdownTimer();
-            RepositionWidget(true);
-            try
-            {
-                SystemSounds.Exclamation.Play();
-            }
-            catch
-            {
-                // Audio device unavailable fallback
-            }
-        }
 
-        private void UpdateWarningVisual()
-        {
-            TimeSpan remaining = timerState.Remaining;
-            bool inFinalTenSeconds = remaining > TimeSpan.Zero && remaining.TotalSeconds <= 10.0;
-            if (!inFinalTenSeconds)
-            {
-                if (warningHighlightActive)
-                {
-                    warningHighlightActive = false;
-                    ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
-                }
-                return;
-            }
-
-            bool highlight = ((int)(remaining.TotalMilliseconds / 250.0) % 2) == 0;
-            if (warningHighlightActive == highlight) return;
-            warningHighlightActive = highlight;
-            ApplyCountdownColors(
-                highlight ? Color.FromArgb(166, 44, 54) : GetThemeBackColor(),
-                highlight ? Color.White : GetThemeForeColor());
-        }
-
-        private void UpdateFinishAnimation()
-        {
-            const double animationDurationMilliseconds = 5000.0;
-            DateTime now = DateTime.UtcNow;
-            double elapsed = (now - finishAnimationStarted).TotalMilliseconds;
-            if (elapsed >= animationDurationMilliseconds)
-            {
-                finishAnimationActive = false;
-                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
-                RefreshCountdownTimer();
-                return;
-            }
-
-            if ((now - lastAlarmBeepTime).TotalMilliseconds >= 800.0)
-            {
-                lastAlarmBeepTime = now;
-                try
-                {
-                    SystemSounds.Exclamation.Play();
-                }
-                catch
-                {
-                    // Audio device unavailable fallback
-                }
-            }
-
-            double progress = elapsed / animationDurationMilliseconds;
-            double pulse = Math.Pow(Math.Sin(progress * Math.PI * 5.0), 2.0) * (1.0 - progress * 0.2);
-            Color background = BlendColor(GetThemeBackColor(), Color.FromArgb(202, 48, 60), pulse);
-            Color foreground = BlendColor(GetThemeForeColor(), Color.White, pulse);
-            ApplyCountdownColors(background, foreground);
-        }
 
         private void QueueReposition(bool force)
         {
