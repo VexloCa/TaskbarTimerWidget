@@ -25,6 +25,8 @@ internal static class WidgetLogicTests
         Run("Widget height constrained to taskbar", WidgetHeightConstrainedToTaskbar);
         Run("Avoids third-party taskbar widgets", AvoidsThirdPartyTaskbarWidgets);
         Run("TaskbarCreated registration", TaskbarCreatedRegistration);
+        Run("Widget color options lookup and fallback", WidgetColorOptionsLookupAndFallback);
+        Run("AppSettings widget color default", AppSettingsWidgetColorDefault);
         Console.WriteLine("All {0} tests passed.", passed);
     }
 
@@ -191,6 +193,35 @@ internal static class WidgetLogicTests
     private static void TaskbarCreatedRegistration()
     {
         True(NativeMethods.RegisterWindowMessage("TaskbarCreated") != 0);
+    }
+
+    private static void WidgetColorOptionsLookupAndFallback()
+    {
+        Equal("Default", WidgetColorOptions.DefaultOption.Id);
+        Equal("Default (System Theme)", WidgetColorOptions.DefaultOption.Name);
+        True(!WidgetColorOptions.DefaultOption.IsGradient);
+
+        WidgetColorOption sunset = WidgetColorOptions.Find("Sunset");
+        Equal("Sunset", sunset.Id);
+        True(sunset.IsGradient);
+
+        WidgetColorOption darkSlate = WidgetColorOptions.Find("DarkSlate");
+        Equal("DarkSlate", darkSlate.Id);
+        True(!darkSlate.IsGradient);
+
+        WidgetColorOption fallback = WidgetColorOptions.Find("NonExistentColorId");
+        Equal("Default", fallback.Id);
+
+        WidgetColorOption nullFallback = WidgetColorOptions.Find(null);
+        Equal("Default", nullFallback.Id);
+
+        True(WidgetColorOptions.All.Count >= 13);
+    }
+
+    private static void AppSettingsWidgetColorDefault()
+    {
+        AppSettings settings = new AppSettings();
+        Equal("Default", settings.WidgetColor);
     }
 
     private static TaskbarInfo NewTaskbar(Rectangle bounds, Rectangle monitor)

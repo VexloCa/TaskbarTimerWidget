@@ -91,6 +91,7 @@ namespace TaskbarTimerWidget
         private bool warningHighlightActive;
         private bool lightTheme;
         private bool themeApplied;
+        private string lastAppliedWidgetColor;
         private bool repositionQueued;
         private bool pendingForcedReposition;
         private bool eventsDetached;
@@ -113,6 +114,7 @@ namespace TaskbarTimerWidget
             DoubleBuffered = true;
             AutoScaleMode = AutoScaleMode.Dpi;
             lightTheme = IsLightTheme();
+            BackColor = Color.Black;
 
             countdownDisplay.Dock = DockStyle.Fill;
             countdownDisplay.Font = new Font("Consolas", 11.0f, FontStyle.Bold);
@@ -190,11 +192,6 @@ namespace TaskbarTimerWidget
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            Color borderColor = lightTheme ? Color.FromArgb(80, 95, 105) : Color.FromArgb(88, 99, 116);
-            using (Pen border = new Pen(borderColor))
-            using (GraphicsPath path = CreateRoundedPath(new Rectangle(0, 0, Width - 1, Height - 1), Math.Max(6, Height / 2)))
-                e.Graphics.DrawPath(border, path);
         }
 
         protected override void WndProc(ref Message message)
@@ -228,6 +225,7 @@ namespace TaskbarTimerWidget
             }
         }
 
+        private readonly ToolStripMenuItem colorMenuItem = new ToolStripMenuItem("Widget color");
         private readonly ToolStripMenuItem soundMenuItem = new ToolStripMenuItem("Alarm sound");
 
         private void BuildContextMenu()
@@ -252,6 +250,7 @@ namespace TaskbarTimerWidget
             ToolStripMenuItem reattachMenuItem = new ToolStripMenuItem("Realign on taskbar");
             reattachMenuItem.Click += delegate { RepositionWidget(true); };
             monitorMenuItem.DropDownOpening += delegate { PopulateMonitorMenu(); };
+            colorMenuItem.DropDownOpening += delegate { PopulateColorMenu(); };
             soundMenuItem.DropDownOpening += delegate { PopulateSoundMenu(); };
             startupMenuItem.CheckOnClick = true;
             startupMenuItem.Checked = IsStartupEnabled();
@@ -267,6 +266,7 @@ namespace TaskbarTimerWidget
                 pauseMenuItem,
                 resetMenuItem,
                 new ToolStripSeparator(),
+                colorMenuItem,
                 soundMenuItem,
                 monitorMenuItem,
                 reattachMenuItem,
@@ -309,6 +309,110 @@ namespace TaskbarTimerWidget
                 };
                 monitorMenuItem.DropDownItems.Add(item);
             }
+        }
+
+        private static Image CreateColorPreviewIcon(WidgetColorOption option, bool isSystemLight)
+        {
+            Bitmap bitmap = new Bitmap(16, 16);
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.Clear(Color.Transparent);
+
+                Rectangle rect = new Rectangle(0, 0, 15, 15);
+                using (GraphicsPath path = CreateRoundedPath(rect, 3))
+                {
+                    if (option.Category == WidgetColorCategory.Default)
+                    {
+                        Color defaultColor = isSystemLight ? Color.FromArgb(232, 234, 237) : Color.FromArgb(38, 40, 45);
+                        using (SolidBrush brush = new SolidBrush(defaultColor))
+                        {
+                            g.FillPath(brush, path);
+                        }
+                    }
+                    else if (option.IsGradient)
+                    {
+                        using (LinearGradientBrush brush = new LinearGradientBrush(rect, option.Color1, option.Color2, option.Angle))
+                        {
+                            g.FillPath(brush, path);
+                        }
+                    }
+                    else
+                    {
+                        using (SolidBrush brush = new SolidBrush(option.Color1))
+                        {
+                            g.FillPath(brush, path);
+                        }
+                    }
+
+                    Color borderPenColor = (option.Category == WidgetColorCategory.Solid && option.Color1.R > 200 && option.Color1.G > 200 && option.Color1.B > 200)
+                        ? Color.FromArgb(160, 160, 160)
+                        : Color.FromArgb(90, 0, 0, 0);
+                    using (Pen borderPen = new Pen(borderPenColor))
+                    {
+                        g.DrawPath(borderPen, path);
+                    }
+                }
+            }
+            return bitmap;
+        }
+
+        private void PopulateColorMenu()
+        {
+            colorMenuItem.DropDownItems.Clear();
+
+            string currentColorId = string.IsNullOrEmpty(settings.WidgetColor) ? "Default" : settings.WidgetColor;
+
+            ToolStripMenuItem defaultItem = new ToolStripMenuItem(WidgetColorOptions.DefaultOption.Name);
+            defaultItem.Tag = WidgetColorOptions.DefaultOption.Id;
+            defaultItem.Image = CreateColorPreviewIcon(WidgetColorOptions.DefaultOption, lightTheme);
+            defaultItem.Checked = string.Equals(currentColorId, WidgetColorOptions.DefaultOption.Id, StringComparison.OrdinalIgnoreCase);
+            defaultItem.Click += ColorMenuItemClick;
+            colorMenuItem.DropDownItems.Add(defaultItem);
+
+            colorMenuItem.DropDownItems.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem solidHeader = new ToolStripMenuItem("Solid Colors");
+            solidHeader.Enabled = false;
+            colorMenuItem.DropDownItems.Add(solidHeader);
+
+            foreach (WidgetColorOption option in WidgetColorOptions.All)
+            {
+                if (option.Category != WidgetColorCategory.Solid) continue;
+                ToolStripMenuItem item = new ToolStripMenuItem(option.Name);
+                item.Tag = option.Id;
+                item.Image = CreateColorPreviewIcon(option, lightTheme);
+                item.Checked = string.Equals(currentColorId, option.Id, StringComparison.OrdinalIgnoreCase);
+                item.Click += ColorMenuItemClick;
+                colorMenuItem.DropDownItems.Add(item);
+            }
+
+            colorMenuItem.DropDownItems.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem gradientHeader = new ToolStripMenuItem("Gradients");
+            gradientHeader.Enabled = false;
+            colorMenuItem.DropDownItems.Add(gradientHeader);
+
+            foreach (WidgetColorOption option in WidgetColorOptions.All)
+            {
+                if (option.Category != WidgetColorCategory.Gradient) continue;
+                ToolStripMenuItem item = new ToolStripMenuItem(option.Name);
+                item.Tag = option.Id;
+                item.Image = CreateColorPreviewIcon(option, lightTheme);
+                item.Checked = string.Equals(currentColorId, option.Id, StringComparison.OrdinalIgnoreCase);
+                item.Click += ColorMenuItemClick;
+                colorMenuItem.DropDownItems.Add(item);
+            }
+        }
+
+        private void ColorMenuItemClick(object sender, EventArgs e)
+        {
+            ToolStripMenuItem item = sender as ToolStripMenuItem;
+            if (item == null || item.Tag == null) return;
+            string selectedId = (string)item.Tag;
+            settings.WidgetColor = selectedId;
+            SaveSettings();
+            ApplyTheme();
         }
 
         private void PopulateSoundMenu()
@@ -462,7 +566,7 @@ namespace TaskbarTimerWidget
                 if (warningHighlightActive)
                 {
                     warningHighlightActive = false;
-                    ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+                    RestoreThemeColors();
                 }
                 return;
             }
@@ -470,9 +574,14 @@ namespace TaskbarTimerWidget
             bool highlight = ((int)(remaining.TotalMilliseconds / 250.0) % 2) == 0;
             if (warningHighlightActive == highlight) return;
             warningHighlightActive = highlight;
-            ApplyCountdownColors(
-                highlight ? Color.FromArgb(166, 44, 54) : GetThemeBackColor(),
-                highlight ? Color.White : GetThemeForeColor());
+            if (highlight)
+            {
+                ApplyCountdownColors(Color.FromArgb(166, 44, 54), Color.White);
+            }
+            else
+            {
+                RestoreThemeColors();
+            }
         }
 
         private void UpdateFinishAnimation()
@@ -484,7 +593,7 @@ namespace TaskbarTimerWidget
             {
                 finishAnimationActive = false;
                 StopAlarmAudioLoop();
-                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+                RestoreThemeColors();
                 RefreshCountdownTimer();
                 return;
             }
@@ -552,7 +661,7 @@ namespace TaskbarTimerWidget
             finishAnimationActive = false;
             StopAlarmAudioLoop();
             warningHighlightActive = false;
-            ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+            RestoreThemeColors();
             SaveSettings();
             ApplyStateToControls();
             UpdatePresetChecks();
@@ -622,7 +731,7 @@ namespace TaskbarTimerWidget
                 finishAnimationActive = false;
                 StopAlarmAudioLoop();
                 warningHighlightActive = false;
-                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+                RestoreThemeColors();
                 toolTip.SetToolTip(countdownDisplay, "Right-click and choose Set custom timer to enter a custom duration.");
                 ApplyStateToControls();
                 UpdateDisplay();
@@ -641,7 +750,7 @@ namespace TaskbarTimerWidget
             {
                 timerState.Pause(DateTime.UtcNow);
                 warningHighlightActive = false;
-                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+                RestoreThemeColors();
             }
             else if (timerState.State == TimerState.Paused)
             {
@@ -664,7 +773,7 @@ namespace TaskbarTimerWidget
             finishAnimationActive = false;
             StopAlarmAudioLoop();
             warningHighlightActive = false;
-            ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+            RestoreThemeColors();
             ApplyStateToControls();
             UpdateDisplay();
             RefreshCountdownTimer();
@@ -676,7 +785,7 @@ namespace TaskbarTimerWidget
             finishAnimationActive = false;
             StopAlarmAudioLoop();
             warningHighlightActive = false;
-            ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+            RestoreThemeColors();
             toolTip.SetToolTip(countdownDisplay, "Right-click and choose Set custom timer to enter a custom duration.");
             ApplyStateToControls();
             UpdateDisplay();
@@ -761,31 +870,79 @@ namespace TaskbarTimerWidget
 
         private void ApplyCountdownColors(Color background, Color foreground)
         {
-            countdownDisplay.SetColors(background, foreground);
+            ApplyCountdownColors(background, Color.Empty, 0f, foreground);
+        }
+
+        private void ApplyCountdownColors(Color background, Color gradientEnd, float angle, Color foreground)
+        {
+            countdownDisplay.SetColors(background, gradientEnd, angle, foreground);
+        }
+
+        private void RestoreThemeColors()
+        {
+            WidgetColorOption colorOption = WidgetColorOptions.Find(settings.WidgetColor);
+            if (colorOption.IsGradient)
+            {
+                ApplyCountdownColors(colorOption.Color1, colorOption.Color2, colorOption.Angle, colorOption.TextColor);
+            }
+            else
+            {
+                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+            }
         }
 
         private Color GetThemeBackColor()
         {
-            return lightTheme ? Color.FromArgb(232, 234, 237) : Color.FromArgb(38, 40, 45);
+            WidgetColorOption colorOption = WidgetColorOptions.Find(settings.WidgetColor);
+            if (colorOption.Category == WidgetColorCategory.Default)
+            {
+                return lightTheme ? Color.FromArgb(232, 234, 237) : Color.FromArgb(38, 40, 45);
+            }
+            return colorOption.Color1;
         }
 
         private Color GetThemeForeColor()
         {
-            return lightTheme ? Color.FromArgb(26, 28, 32) : Color.FromArgb(245, 247, 250);
+            WidgetColorOption colorOption = WidgetColorOptions.Find(settings.WidgetColor);
+            if (colorOption.Category == WidgetColorCategory.Default)
+            {
+                return lightTheme ? Color.FromArgb(26, 28, 32) : Color.FromArgb(245, 247, 250);
+            }
+            return colorOption.TextColor;
         }
 
         private void ApplyTheme()
         {
             bool newLightTheme = IsLightTheme();
-            if (themeApplied && lightTheme == newLightTheme) return;
+            string currentColor = settings.WidgetColor ?? "Default";
+            if (themeApplied && lightTheme == newLightTheme && string.Equals(lastAppliedWidgetColor, currentColor, StringComparison.Ordinal)) return;
+
             lightTheme = newLightTheme;
-            BackColor = GetThemeBackColor();
-            presetButton.SetColors(
-                GetThemeBackColor(),
-                GetThemeForeColor(),
-                lightTheme ? Color.FromArgb(210, 214, 220) : Color.FromArgb(52, 55, 62));
-            if (!finishAnimationActive && !warningHighlightActive)
-                ApplyCountdownColors(GetThemeBackColor(), GetThemeForeColor());
+            lastAppliedWidgetColor = currentColor;
+
+            WidgetColorOption colorOption = WidgetColorOptions.Find(settings.WidgetColor);
+
+            Color backColor = GetThemeBackColor();
+            Color foreColor = GetThemeForeColor();
+            Color hoverColor = colorOption.Category == WidgetColorCategory.Default
+                ? (lightTheme ? Color.FromArgb(210, 214, 220) : Color.FromArgb(52, 55, 62))
+                : BlendColor(colorOption.Color1, Color.White, 0.2);
+
+            BackColor = backColor;
+
+            if (colorOption.IsGradient)
+            {
+                presetButton.SetColors(colorOption.Color1, colorOption.Color2, colorOption.Angle, foreColor, hoverColor);
+                if (!finishAnimationActive && !warningHighlightActive)
+                    ApplyCountdownColors(colorOption.Color1, colorOption.Color2, colorOption.Angle, foreColor);
+            }
+            else
+            {
+                presetButton.SetColors(backColor, foreColor, hoverColor);
+                if (!finishAnimationActive && !warningHighlightActive)
+                    ApplyCountdownColors(backColor, foreColor);
+            }
+
             themeApplied = true;
             Invalidate(true);
         }
@@ -908,10 +1065,10 @@ namespace TaskbarTimerWidget
                 return new Region(path);
         }
 
-        private static GraphicsPath CreateRoundedPath(Rectangle bounds, int radius)
+        internal static GraphicsPath CreateRoundedPath(Rectangle bounds, int radius)
         {
             GraphicsPath path = new GraphicsPath();
-            int diameter = radius * 2;
+            int diameter = Math.Max(2, Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height)));
             path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
             path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
             path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
@@ -924,6 +1081,8 @@ namespace TaskbarTimerWidget
     internal sealed class CountdownDisplay : Control
     {
         private Color backgroundColor = SystemColors.Control;
+        private Color gradientEndColor = Color.Empty;
+        private float gradientAngle = 45f;
         private Color foregroundColor = SystemColors.ControlText;
 
         public CountdownDisplay()
@@ -932,10 +1091,11 @@ namespace TaskbarTimerWidget
                 ControlStyles.UserPaint
                 | ControlStyles.AllPaintingInWmPaint
                 | ControlStyles.OptimizedDoubleBuffer
-                | ControlStyles.Opaque
+                | ControlStyles.SupportsTransparentBackColor
                 | ControlStyles.ResizeRedraw,
                 true);
             UpdateStyles();
+            BackColor = Color.Transparent;
         }
 
         public override string Text
@@ -951,8 +1111,16 @@ namespace TaskbarTimerWidget
 
         public void SetColors(Color background, Color foreground)
         {
-            if (backgroundColor == background && foregroundColor == foreground) return;
+            SetColors(background, Color.Empty, 0f, foreground);
+        }
+
+        public void SetColors(Color background, Color gradientEnd, float angle, Color foreground)
+        {
+            if (backgroundColor == background && gradientEndColor == gradientEnd && Math.Abs(gradientAngle - angle) < 0.01f && foregroundColor == foreground)
+                return;
             backgroundColor = background;
+            gradientEndColor = gradientEnd;
+            gradientAngle = angle;
             foregroundColor = foreground;
             Invalidate();
         }
@@ -963,7 +1131,27 @@ namespace TaskbarTimerWidget
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.Clear(backgroundColor);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            int totalWidth = Parent != null ? Parent.Width : Width;
+            int totalHeight = Parent != null ? Parent.Height : Height;
+            Rectangle gradientBounds = new Rectangle(-Left, -Top, totalWidth, Math.Max(1, totalHeight));
+
+            if (!gradientEndColor.IsEmpty && gradientEndColor != backgroundColor)
+            {
+                using (LinearGradientBrush brush = new LinearGradientBrush(gradientBounds, backgroundColor, gradientEndColor, gradientAngle))
+                {
+                    e.Graphics.FillRectangle(brush, ClientRectangle);
+                }
+            }
+            else
+            {
+                using (SolidBrush brush = new SolidBrush(backgroundColor))
+                {
+                    e.Graphics.FillRectangle(brush, ClientRectangle);
+                }
+            }
+
             TextRenderer.DrawText(
                 e.Graphics,
                 Text,
@@ -981,19 +1169,35 @@ namespace TaskbarTimerWidget
     internal sealed class PresetDropDownButton : Control
     {
         private Color backgroundColor = SystemColors.Control;
+        private Color gradientEndColor = Color.Empty;
+        private float gradientAngle = 45f;
         private Color foregroundColor = SystemColors.ControlText;
         private Color hoverColor = SystemColors.ControlLight;
         private bool hovered;
 
         public PresetDropDownButton()
         {
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
+            SetStyle(
+                ControlStyles.UserPaint
+                | ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.Selectable
+                | ControlStyles.SupportsTransparentBackColor,
+                true);
             TabStop = true;
+            BackColor = Color.Transparent;
         }
 
         public void SetColors(Color background, Color foreground, Color hover)
         {
+            SetColors(background, Color.Empty, 0f, foreground, hover);
+        }
+
+        public void SetColors(Color background, Color gradientEnd, float angle, Color foreground, Color hover)
+        {
             backgroundColor = background;
+            gradientEndColor = gradientEnd;
+            gradientAngle = angle;
             foregroundColor = foreground;
             hoverColor = hover;
             Invalidate();
@@ -1038,8 +1242,36 @@ namespace TaskbarTimerWidget
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            Color fill = !Enabled ? backgroundColor : (hovered || Focused ? hoverColor : backgroundColor);
-            e.Graphics.Clear(fill);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            int totalWidth = Parent != null ? Parent.Width : (Width + Left);
+            int totalHeight = Parent != null ? Parent.Height : Height;
+            Rectangle gradientBounds = new Rectangle(-Left, -Top, totalWidth, Math.Max(1, totalHeight));
+            bool hasGradient = !gradientEndColor.IsEmpty && gradientEndColor != backgroundColor;
+
+            if (hasGradient && Enabled)
+            {
+                using (LinearGradientBrush brush = new LinearGradientBrush(gradientBounds, backgroundColor, gradientEndColor, gradientAngle))
+                {
+                    e.Graphics.FillRectangle(brush, ClientRectangle);
+                }
+
+                if (hovered || Focused)
+                {
+                    using (SolidBrush overlay = new SolidBrush(Color.FromArgb(45, 255, 255, 255)))
+                    {
+                        e.Graphics.FillRectangle(overlay, ClientRectangle);
+                    }
+                }
+            }
+            else
+            {
+                Color fill = !Enabled ? backgroundColor : (hovered || Focused ? hoverColor : backgroundColor);
+                using (SolidBrush brush = new SolidBrush(fill))
+                {
+                    e.Graphics.FillRectangle(brush, ClientRectangle);
+                }
+            }
+
             Color arrowColor = Enabled ? foregroundColor : Color.FromArgb(110, foregroundColor);
             Point center = new Point(Width / 2, Height / 2 + 1);
             Point[] arrow =
@@ -1050,7 +1282,7 @@ namespace TaskbarTimerWidget
             };
             using (SolidBrush brush = new SolidBrush(arrowColor)) e.Graphics.FillPolygon(brush, arrow);
             if (Focused && ShowFocusCues)
-                ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(3, 3, Width - 6, Height - 6), foregroundColor, fill);
+                ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(3, 3, Width - 6, Height - 6), foregroundColor, hasGradient ? Color.Transparent : backgroundColor);
         }
     }
 
