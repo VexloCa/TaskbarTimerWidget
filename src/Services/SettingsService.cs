@@ -4,8 +4,10 @@ namespace TaskbarTimerWidget
 {
     internal sealed class AppSettings
     {
-        public string SelectedPresetId = "30m";
+        public string SelectedPresetId = "10m";
         public string TargetMonitor = string.Empty;
+        public string AlarmSound = "Chimes";
+        public string WidgetColor = "Default";
         public int HorizontalOffset;
         public int VerticalOffset;
         public bool AlwaysVisible = true;
@@ -25,6 +27,8 @@ namespace TaskbarTimerWidget
                     if (key == null) return settings;
                     settings.SelectedPresetId = ReadString(key, "SelectedPreset", settings.SelectedPresetId);
                     settings.TargetMonitor = ReadString(key, "LastTargetMonitor", settings.TargetMonitor);
+                    settings.AlarmSound = ReadString(key, "AlarmSound", settings.AlarmSound);
+                    settings.WidgetColor = ReadString(key, "WidgetColor", settings.WidgetColor);
                     settings.HorizontalOffset = ReadInt(key, "HorizontalOffset", 0);
                     settings.VerticalOffset = ReadInt(key, "VerticalOffset", 0);
                     settings.AlwaysVisible = ReadInt(key, "AlwaysVisible", 1) != 0;
@@ -45,6 +49,8 @@ namespace TaskbarTimerWidget
             {
                 key.SetValue("SelectedPreset", settings.SelectedPresetId, RegistryValueKind.String);
                 key.SetValue("LastTargetMonitor", settings.TargetMonitor, RegistryValueKind.String);
+                key.SetValue("AlarmSound", settings.AlarmSound ?? "Exclamation", RegistryValueKind.String);
+                key.SetValue("WidgetColor", settings.WidgetColor ?? "Default", RegistryValueKind.String);
                 key.SetValue("HorizontalOffset", settings.HorizontalOffset, RegistryValueKind.DWord);
                 key.SetValue("VerticalOffset", settings.VerticalOffset, RegistryValueKind.DWord);
                 key.SetValue("AlwaysVisible", settings.AlwaysVisible ? 1 : 0, RegistryValueKind.DWord);

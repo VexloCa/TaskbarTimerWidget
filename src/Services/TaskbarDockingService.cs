@@ -26,6 +26,16 @@ namespace TaskbarTimerWidget
 
     internal static class TaskbarPositionCalculator
     {
+        private const int DefaultDpi = 96;
+
+        public static Size ScaleForDpi(Size logicalSize, int dpi)
+        {
+            int effectiveDpi = dpi > 0 ? dpi : DefaultDpi;
+            return new Size(
+                Math.Max(1, (logicalSize.Width * effectiveDpi + DefaultDpi / 2) / DefaultDpi),
+                Math.Max(1, (logicalSize.Height * effectiveDpi + DefaultDpi / 2) / DefaultDpi));
+        }
+
         public static TaskbarDockSide DetectSide(Rectangle taskbar, Rectangle monitor)
         {
             int leftDistance = Math.Abs(taskbar.Left - monitor.Left);
@@ -59,18 +69,26 @@ namespace TaskbarTimerWidget
             const int itemGap = 10;
             int x;
             int y;
+            int width = widgetSize.Width;
+            int height = widgetSize.Height;
 
             if (taskbar.Side == TaskbarDockSide.Top || taskbar.Side == TaskbarDockSide.Bottom)
             {
-                x = trayBounds.HasValue
-                    ? trayBounds.Value.Left - widgetSize.Width - 10
-                    : taskbar.Bounds.Right - widgetSize.Width - 190;
-                x += horizontalOffset;
-                x = Clamp(x, taskbar.Bounds.Left + edgePadding, taskbar.Bounds.Right - widgetSize.Width - edgePadding);
-                y = taskbar.Bounds.Top + Math.Max(0, (taskbar.Bounds.Height - widgetSize.Height) / 2) + verticalOffset;
-                y = Clamp(y, taskbar.Bounds.Top, taskbar.Bounds.Bottom - widgetSize.Height);
+                if (taskbar.Bounds.Height > 0)
+                {
+                    int maxHeight = Math.Max(22, taskbar.Bounds.Height - 8);
+                    height = Math.Min(widgetSize.Height, maxHeight);
+                }
 
-                Rectangle target = new Rectangle(x, y, widgetSize.Width, widgetSize.Height);
+                x = trayBounds.HasValue
+                    ? trayBounds.Value.Left - width - 10
+                    : taskbar.Bounds.Right - width - 190;
+                x += horizontalOffset;
+                x = Clamp(x, taskbar.Bounds.Left + edgePadding, taskbar.Bounds.Right - width - edgePadding);
+                y = taskbar.Bounds.Top + Math.Max(0, (taskbar.Bounds.Height - height) / 2) + verticalOffset;
+                y = Clamp(y, taskbar.Bounds.Top, taskbar.Bounds.Bottom - height);
+
+                Rectangle target = new Rectangle(x, y, width, height);
                 if (occupiedBounds != null)
                 {
                     // Move left around other taskbar widgets.
@@ -81,9 +99,9 @@ namespace TaskbarTimerWidget
                         {
                             if (!target.IntersectsWith(occupied)) continue;
                             int movedX = Clamp(
-                                occupied.Left - widgetSize.Width - itemGap,
+                                occupied.Left - width - itemGap,
                                 taskbar.Bounds.Left + edgePadding,
-                                taskbar.Bounds.Right - widgetSize.Width - edgePadding);
+                                taskbar.Bounds.Right - width - edgePadding);
                             if (movedX == target.X) break;
                             target.X = movedX;
                             moved = true;
@@ -98,16 +116,22 @@ namespace TaskbarTimerWidget
             }
             else
             {
+                if (taskbar.Bounds.Width > 0)
+                {
+                    int maxWidth = Math.Max(40, taskbar.Bounds.Width - 8);
+                    width = Math.Min(widgetSize.Width, maxWidth);
+                }
+
                 x = taskbar.Side == TaskbarDockSide.Left
                     ? taskbar.Bounds.Right + edgePadding
-                    : taskbar.Bounds.Left - widgetSize.Width - edgePadding;
+                    : taskbar.Bounds.Left - width - edgePadding;
                 x += horizontalOffset;
-                y = taskbar.Bounds.Bottom - widgetSize.Height - edgePadding + verticalOffset;
-                x = Clamp(x, taskbar.MonitorBounds.Left, taskbar.MonitorBounds.Right - widgetSize.Width);
-                y = Clamp(y, taskbar.MonitorBounds.Top, taskbar.MonitorBounds.Bottom - widgetSize.Height);
+                y = taskbar.Bounds.Bottom - height - edgePadding + verticalOffset;
+                x = Clamp(x, taskbar.MonitorBounds.Left, taskbar.MonitorBounds.Right - width);
+                y = Clamp(y, taskbar.MonitorBounds.Top, taskbar.MonitorBounds.Bottom - height);
             }
 
-            return new Rectangle(x, y, widgetSize.Width, widgetSize.Height);
+            return new Rectangle(x, y, width, height);
         }
 
         private static int Clamp(int value, int minimum, int maximum)
@@ -168,8 +192,27 @@ namespace TaskbarTimerWidget
 
         public bool Reposition(Size widgetSize, string targetMonitor, int horizontalOffset, int verticalOffset, bool force)
         {
-            TaskbarInfo taskbar = SelectTaskbar(GetTaskbars(), targetMonitor);
+            IList<TaskbarInfo> taskbars = GetTaskbars();
+            TaskbarInfo taskbar = SelectTaskbar(taskbars, targetMonitor);
             if (taskbar == null) return PositionFallback(widgetSize, targetMonitor, force);
+
+            // For non-forced repositions, don't switch to a different monitor.
+            // Only allow monitor changes when explicitly forced (user action, display change, etc.).
+            if (!force && !string.IsNullOrEmpty(CurrentMonitor)
+                && !string.Equals(taskbar.MonitorDeviceName, CurrentMonitor, StringComparison.OrdinalIgnoreCase))
+            {
+                // Try to stay on the current monitor instead of switching.
+                TaskbarInfo currentTaskbar = null;
+                foreach (TaskbarInfo tb in taskbars)
+                {
+                    if (string.Equals(tb.MonitorDeviceName, CurrentMonitor, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentTaskbar = tb;
+                        break;
+                    }
+                }
+                if (currentTaskbar != null) taskbar = currentTaskbar;
+            }
 
             Rectangle? trayBounds = TryGetTrayBounds(taskbar.Handle);
             IList<Rectangle> occupiedBounds = GetForeignTaskbarChildren(taskbar);
@@ -233,7 +276,7 @@ namespace TaskbarTimerWidget
 
         internal static TaskbarInfo SelectTaskbar(IList<TaskbarInfo> taskbars, string targetMonitor)
         {
-            if (!string.IsNullOrEmpty(targetMonitor))
+            if (!string.IsNullOrEmpty(targetMonitor) && !string.Equals(targetMonitor, "Primary", StringComparison.OrdinalIgnoreCase))
             {
                 foreach (TaskbarInfo taskbar in taskbars)
                 {
@@ -241,9 +284,17 @@ namespace TaskbarTimerWidget
                 }
             }
 
+            // Prefer the Shell_TrayWnd primary taskbar.
             foreach (TaskbarInfo taskbar in taskbars)
             {
                 if (taskbar.IsPrimary) return taskbar;
+            }
+
+            // Fall back to the Windows-configured primary display.
+            string primaryDevice = Screen.PrimaryScreen.DeviceName;
+            foreach (TaskbarInfo taskbar in taskbars)
+            {
+                if (string.Equals(taskbar.MonitorDeviceName, primaryDevice, StringComparison.OrdinalIgnoreCase)) return taskbar;
             }
 
             return taskbars.Count > 0 ? taskbars[0] : null;

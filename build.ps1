@@ -77,7 +77,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
 
 $logicSources = @(
     (Join-Path $PSScriptRoot 'src\Models\TimerModels.cs'),
+    (Join-Path $PSScriptRoot 'src\Models\WidgetColorOptions.cs'),
     (Join-Path $PSScriptRoot 'src\Native\Win32Interop.cs'),
+    (Join-Path $PSScriptRoot 'src\Services\SettingsService.cs'),
     (Join-Path $PSScriptRoot 'src\Services\TaskbarDockingService.cs'),
     (Join-Path $PSScriptRoot 'tests\WidgetLogicTests.cs')
 )

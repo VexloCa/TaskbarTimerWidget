@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Recover the widget's correct physical size automatically after transient Explorer or display DPI changes, without requiring an application restart.
+
 ## [1.0.0] - 2026-07-18
 
 ### Added

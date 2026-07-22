@@ -27,9 +27,12 @@ foreach ($process in Get-Process -Name 'TaskbarTimerWidget' -ErrorAction Silentl
 }
 
 $runKeyPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-$registeredCommand = Get-ItemPropertyValue -Path $runKeyPath -Name 'TaskbarTimerWidget' -ErrorAction SilentlyContinue
-if ($registeredCommand -and $registeredCommand.IndexOf($installedExecutable, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-    Remove-ItemProperty -Path $runKeyPath -Name 'TaskbarTimerWidget' -ErrorAction SilentlyContinue
+$runKey = Get-ItemProperty -Path $runKeyPath -ErrorAction SilentlyContinue
+if ($null -ne $runKey -and $runKey.PSObject.Properties['TaskbarTimerWidget']) {
+    $registeredCommand = [string]$runKey.TaskbarTimerWidget
+    if ($registeredCommand.IndexOf($installedExecutable, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        Remove-ItemProperty -Path $runKeyPath -Name 'TaskbarTimerWidget' -ErrorAction SilentlyContinue
+    }
 }
 
 $startMenuDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs)

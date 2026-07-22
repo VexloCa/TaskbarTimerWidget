@@ -59,6 +59,9 @@ namespace TaskbarTimerWidget
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         internal static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
 
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        internal static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool GetWindowRect(IntPtr window, out NativeRect rectangle);
@@ -66,6 +69,9 @@ namespace TaskbarTimerWidget
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+        [DllImport("user32.dll")]
+        internal static extern uint GetDpiForWindow(IntPtr window);
 
         [DllImport("user32.dll")]
         internal static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
