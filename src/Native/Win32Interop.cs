@@ -68,6 +68,9 @@ namespace TaskbarTimerWidget
         internal static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
         [DllImport("user32.dll")]
+        internal static extern uint GetDpiForWindow(IntPtr window);
+
+        [DllImport("user32.dll")]
         internal static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]

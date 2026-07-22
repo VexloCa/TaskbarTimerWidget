@@ -83,6 +83,7 @@ namespace TaskbarTimerWidget
         private TaskbarDockingService dockingService;
         private TimerPreset selectedPreset;
         private DateTime finishAnimationStarted;
+        private DateTime lastAlarmBeepTime;
         private string lastDisplayText = string.Empty;
         private bool exiting;
         private bool dialogOpen;
@@ -134,8 +135,8 @@ namespace TaskbarTimerWidget
 
             countdownTimer.Interval = 200;
             countdownTimer.Tick += CountdownTimerTick;
-            dockingSafetyTimer.Interval = 3000;
-            dockingSafetyTimer.Tick += delegate { RepositionWidget(true); };
+            dockingSafetyTimer.Interval = 5000;
+            dockingSafetyTimer.Tick += delegate { RepositionWidget(false); };
             dockingSafetyTimer.Start();
 
             ApplyTheme();
@@ -181,7 +182,7 @@ namespace TaskbarTimerWidget
             if (Width > 0 && Height > 0)
             {
                 Region oldRegion = Region;
-                Region = CreateRoundedRegion(ClientRectangle, Math.Max(6, Height / 4));
+                Region = CreateRoundedRegion(ClientRectangle, Math.Max(6, Height / 2));
                 if (oldRegion != null) oldRegion.Dispose();
             }
         }
@@ -192,7 +193,7 @@ namespace TaskbarTimerWidget
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             Color borderColor = lightTheme ? Color.FromArgb(80, 95, 105) : Color.FromArgb(88, 99, 116);
             using (Pen border = new Pen(borderColor))
-            using (GraphicsPath path = CreateRoundedPath(new Rectangle(0, 0, Width - 1, Height - 1), Math.Max(6, Height / 4)))
+            using (GraphicsPath path = CreateRoundedPath(new Rectangle(0, 0, Width - 1, Height - 1), Math.Max(6, Height / 2)))
                 e.Graphics.DrawPath(border, path);
         }
 
@@ -278,11 +279,24 @@ namespace TaskbarTimerWidget
         private void PopulateMonitorMenu()
         {
             monitorMenuItem.DropDownItems.Clear();
+
+            bool isDefaultSelected = string.IsNullOrEmpty(settings.TargetMonitor) || string.Equals(settings.TargetMonitor, "Primary", StringComparison.OrdinalIgnoreCase);
+            ToolStripMenuItem defaultItem = new ToolStripMenuItem("Main display (Default)");
+            defaultItem.Checked = isDefaultSelected;
+            defaultItem.Click += delegate
+            {
+                settings.TargetMonitor = string.Empty;
+                SaveSettings();
+                RepositionWidget(true);
+            };
+            monitorMenuItem.DropDownItems.Add(defaultItem);
+            monitorMenuItem.DropDownItems.Add(new ToolStripSeparator());
+
             foreach (Screen screen in Screen.AllScreens)
             {
                 ToolStripMenuItem item = new ToolStripMenuItem(screen.DeviceName + (screen.Primary ? " (Primary)" : string.Empty));
                 item.Tag = screen.DeviceName;
-                item.Checked = string.Equals(settings.TargetMonitor, screen.DeviceName, StringComparison.OrdinalIgnoreCase);
+                item.Checked = !isDefaultSelected && string.Equals(settings.TargetMonitor, screen.DeviceName, StringComparison.OrdinalIgnoreCase);
                 item.Click += delegate(object sender, EventArgs e)
                 {
                     settings.TargetMonitor = (string)((ToolStripMenuItem)sender).Tag;
@@ -517,7 +531,8 @@ namespace TaskbarTimerWidget
         private void AnnounceFinished()
         {
             finishAnimationActive = true;
-            finishAnimationStarted = DateTime.Now;
+            finishAnimationStarted = DateTime.UtcNow;
+            lastAlarmBeepTime = DateTime.UtcNow;
             warningHighlightActive = false;
             countdownDisplay.Text = "00:00:00";
             lastDisplayText = "00:00:00";
@@ -525,7 +540,14 @@ namespace TaskbarTimerWidget
             toolTip.SetToolTip(countdownDisplay, "Time is up. Choose a preset, or right-click and choose Set custom timer.");
             RefreshCountdownTimer();
             RepositionWidget(true);
-            SystemSounds.Exclamation.Play();
+            try
+            {
+                SystemSounds.Exclamation.Play();
+            }
+            catch
+            {
+                // Audio device unavailable fallback
+            }
         }
 
         private void UpdateWarningVisual()
@@ -552,8 +574,9 @@ namespace TaskbarTimerWidget
 
         private void UpdateFinishAnimation()
         {
-            const double animationDurationMilliseconds = 1800.0;
-            double elapsed = (DateTime.Now - finishAnimationStarted).TotalMilliseconds;
+            const double animationDurationMilliseconds = 5000.0;
+            DateTime now = DateTime.UtcNow;
+            double elapsed = (now - finishAnimationStarted).TotalMilliseconds;
             if (elapsed >= animationDurationMilliseconds)
             {
                 finishAnimationActive = false;
@@ -562,8 +585,21 @@ namespace TaskbarTimerWidget
                 return;
             }
 
+            if ((now - lastAlarmBeepTime).TotalMilliseconds >= 800.0)
+            {
+                lastAlarmBeepTime = now;
+                try
+                {
+                    SystemSounds.Exclamation.Play();
+                }
+                catch
+                {
+                    // Audio device unavailable fallback
+                }
+            }
+
             double progress = elapsed / animationDurationMilliseconds;
-            double pulse = Math.Pow(Math.Sin(progress * Math.PI * 3.0), 2.0) * (1.0 - progress * 0.45);
+            double pulse = Math.Pow(Math.Sin(progress * Math.PI * 5.0), 2.0) * (1.0 - progress * 0.2);
             Color background = BlendColor(GetThemeBackColor(), Color.FromArgb(202, 48, 60), pulse);
             Color foreground = BlendColor(GetThemeForeColor(), Color.White, pulse);
             ApplyCountdownColors(background, foreground);
@@ -587,13 +623,17 @@ namespace TaskbarTimerWidget
         private void RepositionWidget(bool force)
         {
             if (exiting || !IsHandleCreated || dockingService == null) return;
-            dockingService.Reposition(Size, settings.TargetMonitor, settings.HorizontalOffset, settings.VerticalOffset, force);
-            if (!string.IsNullOrEmpty(dockingService.CurrentMonitor)
-                && !string.Equals(settings.TargetMonitor, dockingService.CurrentMonitor, StringComparison.OrdinalIgnoreCase))
-            {
-                settings.TargetMonitor = dockingService.CurrentMonitor;
-                SaveSettings();
-            }
+            // Do not feed the current window size back into docking. During a DPI or
+            // Explorer transition Windows can briefly assign a stale suggested size;
+            // reusing it makes the bad geometry persist until the process is restarted.
+            // Rebuild the physical size from the fixed logical dimensions every time so
+            // the periodic docking check can repair the window by itself.
+            int dpi = (int)NativeMethods.GetDpiForWindow(Handle);
+            if (dpi <= 0) dpi = DeviceDpi;
+            Size desiredSize = TaskbarPositionCalculator.ScaleForDpi(
+                new Size(WidgetWidth, WidgetHeight),
+                dpi);
+            dockingService.Reposition(desiredSize, settings.TargetMonitor, settings.HorizontalOffset, settings.VerticalOffset, force);
         }
 
         private void DisplaySettingsChanged(object sender, EventArgs e)

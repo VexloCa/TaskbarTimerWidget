@@ -11,6 +11,7 @@ internal static class WidgetLogicTests
     {
         Run("Preset values and order", PresetValuesAndOrder);
         Run("Preset selection remains idle", PresetSelectionRemainsIdle);
+        Run("Widget size follows current DPI", WidgetSizeFollowsCurrentDpi);
         Run("Start pause resume complete", StartPauseResumeComplete);
         Run("Running timer cannot be restarted", RunningTimerCannotBeRestarted);
         Run("Pausing an expired timer completes it", PausingExpiredTimerCompletesIt);
@@ -21,9 +22,18 @@ internal static class WidgetLogicTests
         Run("Position clamps to monitor", PositionClampsToMonitor);
         Run("Target monitor and primary fallback", TargetMonitorAndPrimaryFallback);
         Run("DPI-scaled positioning", DpiScaledPositioning);
+        Run("Widget height constrained to taskbar", WidgetHeightConstrainedToTaskbar);
         Run("Avoids third-party taskbar widgets", AvoidsThirdPartyTaskbarWidgets);
         Run("TaskbarCreated registration", TaskbarCreatedRegistration);
         Console.WriteLine("All {0} tests passed.", passed);
+    }
+
+    private static void WidgetSizeFollowsCurrentDpi()
+    {
+        Equal(new Size(132, 32), TaskbarPositionCalculator.ScaleForDpi(new Size(132, 32), 96));
+        Equal(new Size(165, 40), TaskbarPositionCalculator.ScaleForDpi(new Size(132, 32), 120));
+        Equal(new Size(198, 48), TaskbarPositionCalculator.ScaleForDpi(new Size(132, 32), 144));
+        Equal(new Size(132, 32), TaskbarPositionCalculator.ScaleForDpi(new Size(132, 32), 0));
     }
 
     private static void PresetValuesAndOrder()
@@ -144,6 +154,8 @@ internal static class WidgetLogicTests
 
         Equal(secondary, TaskbarDockingService.SelectTaskbar(taskbars, @"\\.\DISPLAY2"));
         Equal(primary, TaskbarDockingService.SelectTaskbar(taskbars, @"\\.\MISSING"));
+        Equal(primary, TaskbarDockingService.SelectTaskbar(taskbars, "Primary"));
+        Equal(primary, TaskbarDockingService.SelectTaskbar(taskbars, string.Empty));
     }
 
     private static void DpiScaledPositioning()
@@ -154,6 +166,14 @@ internal static class WidgetLogicTests
         Equal(48, result.Height);
         True(result.Left >= taskbar.Bounds.Left && result.Right <= taskbar.Bounds.Right);
         True(result.Top >= taskbar.Bounds.Top && result.Bottom <= taskbar.Bounds.Bottom);
+    }
+
+    private static void WidgetHeightConstrainedToTaskbar()
+    {
+        TaskbarInfo taskbar = NewTaskbar(new Rectangle(0, 1040, 1920, 40), new Rectangle(0, 0, 1920, 1080));
+        Rectangle result = TaskbarPositionCalculator.Calculate(taskbar, new Size(165, 40), null, 0, 0);
+        Equal(32, result.Height);
+        Equal(1044, result.Top);
     }
 
     private static void AvoidsThirdPartyTaskbarWidgets()
